@@ -3,6 +3,7 @@ from app.db.session import SessionLocal
 from app.models import Theme, Post
 from app.services.nlp_service import NLPService
 from app.core.config import settings
+from app.core.logging import logger
 import re
 from datetime import datetime, timedelta
 
@@ -49,6 +50,7 @@ class ThemeService:
             # Only consider themes with significant similarity
             if max_similarity >= settings.SIMILARITY_THRESHOLD:
                 candidates.append((theme, max_similarity))
+                logger.info(f"Found candidate theme '{theme.title}' with similarity score: {max_similarity:.2f}")
         
         # Sort by similarity score
         return sorted(candidates, key=lambda x: x[1], reverse=True)
@@ -63,6 +65,7 @@ class ThemeService:
             if candidates:
                 # Get the best matching theme
                 best_theme, similarity = candidates[0]
+                logger.info(f"Selected best matching theme '{best_theme.title}' with similarity score: {similarity:.2f}")
                 
                 # If we have multiple good candidates, consider merging them
                 if len(candidates) > 1 and candidates[1][1] >= settings.SIMILARITY_THRESHOLD:
@@ -71,6 +74,7 @@ class ThemeService:
                     
                     # If the second theme is very similar to the first, merge them
                     if second_similarity >= settings.SIMILARITY_THRESHOLD + 0.1:  # Slightly higher threshold for merging
+                        logger.info(f"Merging themes '{second_theme.title}' into '{best_theme.title}' due to high similarity: {second_similarity:.2f}")
                         # Move all posts from second theme to first theme
                         posts_to_move = db.query(Post).filter(Post.theme_id == second_theme.id).all()
                         for post in posts_to_move:
@@ -79,10 +83,12 @@ class ThemeService:
                         # Update the first theme's title if it's older
                         if best_theme.created_at > second_theme.created_at:
                             best_theme.title = self.clean_title(thesis)
+                            logger.info(f"Updated theme title to: {best_theme.title}")
                         
                         # Delete the second theme
                         db.delete(second_theme)
                         db.commit()
+                        logger.info(f"Deleted merged theme (ID: {second_theme.id})")
                 
                 return best_theme
 
@@ -92,6 +98,7 @@ class ThemeService:
             db.add(new_theme)
             db.commit()
             db.refresh(new_theme)
+            logger.info(f"Created new theme: '{clean_title}' (ID: {new_theme.id})")
             return new_theme
 
         finally:
@@ -103,9 +110,11 @@ class ThemeService:
         try:
             theme = db.query(Theme).filter(Theme.id == theme_id).first()
             if not theme:
+                logger.warning(f"Theme not found with ID: {theme_id}")
                 return None
 
             posts = db.query(Post).filter(Post.theme_id == theme_id).order_by(Post.published_at).all()
+            logger.info(f"Retrieved {len(posts)} posts for theme '{theme.title}' (ID: {theme_id})")
             
             return {
                 "theme_id": theme.id,
@@ -129,7 +138,7 @@ class ThemeService:
         db = SessionLocal()
         try:
             themes = db.query(Theme).all()
-            return [
+            theme_data = [
                 {
                     "id": theme.id,
                     "title": theme.title,
@@ -137,5 +146,7 @@ class ThemeService:
                 }
                 for theme in themes
             ]
+            logger.info(f"Retrieved {len(theme_data)} themes with post counts")
+            return theme_data
         finally:
             db.close() 
